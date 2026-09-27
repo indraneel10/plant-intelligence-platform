@@ -17,5 +17,9 @@ export const api={
   observations:(id:string)=>request<unknown[]>("/plants/"+encodeURIComponent(id)+"/observations"),
   sensorHistory:(id:string)=>request<unknown[]>("/plants/"+encodeURIComponent(id)+"/sensor-history"),
   decisions:(id:string)=>request<unknown[]>("/plants/"+encodeURIComponent(id)+"/decisions"),
-  irrigationHistory:(id:string)=>request<unknown[]>("/plants/"+encodeURIComponent(id)+"/irrigation-history")
+  irrigationHistory:(id:string)=>request<unknown[]>("/plants/"+encodeURIComponent(id)+"/irrigation-history"),
+  chat:(message:string,plantId?:string)=>request<{message:string;mode:string;tools_used:string[]}>("/ai/chat",{
+    method:"POST",
+    body:JSON.stringify({message,plant_id:plantId??null})
+  })
 };
