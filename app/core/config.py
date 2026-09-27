@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     hardware_mode: str = "mock"
     mqtt_sensor_topic: str = "plant/sensors"
     mqtt_actuator_topic: str = "plant/actuators/command"
+    capture_interval_hours: int = 48
+    ai_model: str = "gpt-5.6-luna"
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 
 settings = Settings()
