@@ -2,6 +2,10 @@ from fastapi import FastAPI
 
 from app.api.health import router as health_router
 from app.core.config import settings
+from app.persistence.database import init_db
+from app.api.plants import router as plants_router
+from app.api.observations import router as observations_router
+from app.api.history import router as history_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -10,6 +14,13 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(plants_router)
+app.include_router(observations_router)
+app.include_router(history_router)
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
 
 
 @app.get("/")
