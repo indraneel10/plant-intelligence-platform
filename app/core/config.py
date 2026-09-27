@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     mqtt_broker_host: str = "localhost"
     mqtt_broker_port: int = 1883
     capture_interval_hours: int = 48
+    hardware_mode: str = "mock"
+    mqtt_sensor_topic: str = "plant/sensors"
+    mqtt_actuator_topic: str = "plant/actuators/command"
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 
 settings = Settings()
