@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.runtime import build_monitor
+from app.adapters.mock import MockActuator, MockCamera, MockSensor
 from app.domain.profile import PlantProfile
 from app.intelligence.decision_engine import DecisionEngine
 from app.intelligence.safety_engine import SafetyEngine
@@ -10,12 +10,18 @@ from app.vision.engine import RuleBasedVisionEngine
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
 
+
 @router.post("/{plant_id}/run")
 def run_monitor(plant_id: str):
     profile = PlantProfile(plant_id=plant_id, zone_id="zone-1")
     monitor = PlantMonitor(
-        MockCamera(), MockSensor(), RuleBasedVisionEngine(), MockActuator(),
-        DecisionEngine(), SafetyEngine(), SensorFusionEngine(),
+        MockCamera(),
+        MockSensor(),
+        RuleBasedVisionEngine(),
+        MockActuator(),
+        DecisionEngine(),
+        SafetyEngine(),
+        SensorFusionEngine(),
     )
     try:
         result = monitor.run_once(profile, tank_level=100.0)
@@ -26,7 +32,10 @@ def run_monitor(plant_id: str):
         "frame_id": result.frame_id,
         "decision": result.decision.action.value,
         "health_score": result.observation.health_score,
-        "soil_moisture": next((r.value for r in result.sensor_readings if r.sensor_type.value == "soil_moisture"), None),
+        "soil_moisture": next(
+            (r.value for r in result.sensor_readings if r.sensor_type.value == "soil_moisture"),
+            None,
+        ),
         "reason": result.decision.reason,
         "confidence": result.decision.confidence,
         "action": result.action.action_type.value if result.action else None,
