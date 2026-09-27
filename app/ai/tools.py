@@ -1,317 +1,80 @@
 import json
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-
 from app.ai.state_tools import get_current_decision, get_current_sensor_state, get_latest_vision_analysis, get_plant_state, get_recent_events, run_monitoring_cycle
-from app.persistence.models import (
-    DecisionModel,
-    IrrigationActionModel,
-    PlantModel,
-    PlantObservationModel,
-    SensorObservationModel,
-)
-
+from app.persistence.audit import record_audit_event
+from app.persistence.models import DecisionModel, IrrigationActionModel, PlantModel, PlantObservationModel, SensorObservationModel
 
 def _serialize(value):
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
+    if hasattr(value, "isoformat"): return value.isoformat()
     return value
-
 
 def get_plant(db: Session, plant_id: str) -> dict:
     plant = db.get(PlantModel, plant_id)
-    if plant is None:
-        return {"error": "Plant not found", "plant_id": plant_id}
-    return {
-        "plant_id": plant.plant_id,
-        "name": plant.name,
-        "species": plant.species,
-        "zone_id": plant.zone_id,
-        "location_label": plant.location_label,
-    }
-
+    if plant is None: return {"error": "Plant not found", "plant_id": plant_id}
+    return {"plant_id": plant.plant_id, "name": plant.name, "species": plant.species, "zone_id": plant.zone_id, "location_label": plant.location_label}
 
 def get_sensor_history(db: Session, plant_id: str, limit: int = 10) -> list[dict]:
-    rows = (
-        db.query(SensorObservationModel)
-        .filter(SensorObservationModel.plant_id == plant_id)
-        .order_by(SensorObservationModel.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            "sensor_id": r.sensor_id,
-            "sensor_type": r.sensor_type,
-            "value": r.value,
-            "unit": r.unit,
-            "zone_id": r.zone_id,
-            "timestamp": _serialize(r.timestamp),
-        }
-        for r in rows
-    ]
-
+    rows = db.query(SensorObservationModel).filter(SensorObservationModel.plant_id == plant_id).order_by(SensorObservationModel.timestamp.desc()).limit(limit).all()
+    return [{"sensor_id":r.sensor_id,"sensor_type":r.sensor_type,"value":r.value,"unit":r.unit,"zone_id":r.zone_id,"timestamp":_serialize(r.timestamp)} for r in rows]
 
 def get_plant_observations(db: Session, plant_id: str, limit: int = 5) -> list[dict]:
-    rows = (
-        db.query(PlantObservationModel)
-        .filter(PlantObservationModel.plant_id == plant_id)
-        .order_by(PlantObservationModel.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            "timestamp": _serialize(r.timestamp),
-            "health_score": r.health_score,
-            "wilting_probability": r.wilting_probability,
-            "yellowing_probability": r.yellowing_probability,
-            "disease_probability": r.disease_probability,
-            "image_quality": r.image_quality,
-            "leaf_area_ratio": r.leaf_area_ratio,
-            "water_stress_probability": r.water_stress_probability,
-            "heat_stress_probability": r.heat_stress_probability,
-        }
-        for r in rows
-    ]
-
+    rows = db.query(PlantObservationModel).filter(PlantObservationModel.plant_id == plant_id).order_by(PlantObservationModel.timestamp.desc()).limit(limit).all()
+    return [{"timestamp":_serialize(r.timestamp),"health_score":r.health_score,"wilting_probability":r.wilting_probability,"yellowing_probability":r.yellowing_probability,"disease_probability":r.disease_probability,"image_quality":r.image_quality,"leaf_area_ratio":r.leaf_area_ratio,"water_stress_probability":r.water_stress_probability,"heat_stress_probability":r.heat_stress_probability} for r in rows]
 
 def get_decisions(db: Session, plant_id: str, limit: int = 5) -> list[dict]:
-    rows = (
-        db.query(DecisionModel)
-        .filter(DecisionModel.plant_id == plant_id)
-        .order_by(DecisionModel.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            "action": r.action,
-            "reason": r.reason,
-            "confidence": r.confidence,
-            "duration_seconds": r.duration_seconds,
-            "created_at": _serialize(r.created_at),
-        }
-        for r in rows
-    ]
-
+    rows = db.query(DecisionModel).filter(DecisionModel.plant_id == plant_id).order_by(DecisionModel.created_at.desc()).limit(limit).all()
+    return [{"action":r.action,"reason":r.reason,"confidence":r.confidence,"duration_seconds":r.duration_seconds,"created_at":_serialize(r.created_at)} for r in rows]
 
 def get_irrigation_history(db: Session, plant_id: str, limit: int = 10) -> list[dict]:
-    rows = (
-        db.query(IrrigationActionModel)
-        .filter(IrrigationActionModel.plant_id == plant_id)
-        .order_by(IrrigationActionModel.executed_at.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            "zone_id": r.zone_id,
-            "action_type": r.action_type,
-            "duration_seconds": r.duration_seconds,
-            "executed_at": _serialize(r.executed_at),
-        }
-        for r in rows
-    ]
+    rows = db.query(IrrigationActionModel).filter(IrrigationActionModel.plant_id == plant_id).order_by(IrrigationActionModel.executed_at.desc()).limit(limit).all()
+    return [{"zone_id":r.zone_id,"action_type":r.action_type,"duration_seconds":r.duration_seconds,"executed_at":_serialize(r.executed_at)} for r in rows]
 
-
-def request_irrigation(db: Session, plant_id: str, duration_seconds: int, zone_id: str | None = None, reason: str | None = None) -> dict:
-    """Validate an irrigation request through the platform safety engine without executing hardware."""
-    from datetime import datetime, timezone
+def request_irrigation(db: Session, plant_id: str, duration_seconds: int, zone_id: str|None=None, reason: str|None=None) -> dict:
     from app.core.exceptions import SafetyViolation
     from app.domain.decision import Decision, DecisionAction
     from app.domain.profile import PlantProfile
     from app.intelligence.safety_engine import SafetyEngine
-
     plant = db.get(PlantModel, plant_id)
+    actor_id, actor_role = "ai-copilot", "ai_agent"
     if plant is None:
-        return {"status": "rejected", "reason": "Plant not found", "plant_id": plant_id}
+        record_audit_event(db,event_type="ai_irrigation_request",actor_id=actor_id,actor_role=actor_role,plant_id=plant_id,status="rejected",reason="Plant not found")
+        return {"status":"rejected","reason":"Plant not found","plant_id":plant_id}
     target_zone = zone_id or plant.zone_id
     if not target_zone:
-        return {"status": "rejected", "reason": "No irrigation zone configured", "plant_id": plant_id}
+        record_audit_event(db,event_type="ai_irrigation_request",actor_id=actor_id,actor_role=actor_role,plant_id=plant_id,status="rejected",reason="No irrigation zone configured")
+        return {"status":"rejected","reason":"No irrigation zone configured","plant_id":plant_id}
     if plant.zone_id and zone_id and zone_id != plant.zone_id:
-        return {"status": "rejected", "reason": "Requested zone does not match plant zone", "plant_id": plant_id}
-
-    profile = PlantProfile(
-        plant_id=plant_id,
-        zone_id=target_zone,
-        max_irrigation_seconds=min(300, duration_seconds),
-    )
-    decision = Decision(
-        plant_id=plant_id,
-        action=DecisionAction.WATER,
-        reason=reason or "AI Copilot requested irrigation.",
-        confidence=1.0,
-        duration_seconds=duration_seconds,
-        created_at=datetime.now(timezone.utc),
-    )
-    try:
-        action = SafetyEngine().approve(decision, profile, tank_level=100.0)
+        record_audit_event(db,event_type="ai_irrigation_request",actor_id=actor_id,actor_role=actor_role,plant_id=plant_id,status="rejected",zone_id=zone_id,duration_seconds=duration_seconds,reason="Requested zone does not match plant zone")
+        return {"status":"rejected","reason":"Requested zone does not match plant zone","plant_id":plant_id}
+    profile=PlantProfile(plant_id=plant_id,zone_id=target_zone,max_irrigation_seconds=min(300,duration_seconds))
+    decision=Decision(plant_id=plant_id,action=DecisionAction.WATER,reason=reason or "AI Copilot requested irrigation.",confidence=1.0,duration_seconds=duration_seconds,created_at=datetime.now(timezone.utc))
+    try: action=SafetyEngine().approve(decision,profile,tank_level=100.0)
     except SafetyViolation as exc:
-        return {"status": "rejected", "reason": str(exc), "plant_id": plant_id}
+        record_audit_event(db,event_type="ai_irrigation_request",actor_id=actor_id,actor_role=actor_role,plant_id=plant_id,status="rejected",zone_id=target_zone,duration_seconds=duration_seconds,reason=str(exc))
+        return {"status":"rejected","reason":str(exc),"plant_id":plant_id}
     if action is None:
-        return {"status": "rejected", "reason": "Safety engine did not approve the request", "plant_id": plant_id}
-    return {
-        "status": "approved",
-        "executed": False,
-        "plant_id": plant_id,
-        "zone_id": action.zone_id,
-        "duration_seconds": action.duration_seconds,
-        "action_type": action.action_type.value,
-        "message": "Safety gate approved the request. Hardware execution is disabled for the AI tool.",
-    }
-
+        return {"status":"rejected","reason":"Safety engine did not approve the request","plant_id":plant_id}
+    record_audit_event(db,event_type="ai_irrigation_request",actor_id=actor_id,actor_role=actor_role,plant_id=plant_id,status="approved",action_type=action.action_type.value,zone_id=action.zone_id,duration_seconds=action.duration_seconds,reason=decision.reason,details="Approved but not executed")
+    return {"status":"approved","executed":False,"plant_id":plant_id,"zone_id":action.zone_id,"duration_seconds":action.duration_seconds,"action_type":action.action_type.value,"message":"Safety gate approved the request. Hardware execution is disabled for the AI tool."}
 
 TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "name": "get_plant",
-        "description": "Get identity and configuration for a plant.",
-        "parameters": {
-            "type": "object",
-            "properties": {"plant_id": {"type": "string"}},
-            "required": ["plant_id"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_sensor_history",
-        "description": "Read recent sensor observations for a plant. Use this before making claims about current soil or environmental conditions.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plant_id": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-            },
-            "required": ["plant_id", "limit"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_plant_observations",
-        "description": "Read recent camera/vision-derived plant observations.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plant_id": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 10},
-            },
-            "required": ["plant_id", "limit"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_decisions",
-        "description": "Read recent platform decisions and their reasons.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plant_id": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 10},
-            },
-            "required": ["plant_id", "limit"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "request_irrigation",
-        "description": "Request irrigation through the platform safety gate. This tool validates and approves a request but never executes hardware.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plant_id": {"type": "string"},
-                "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
-                "zone_id": {"type": ["string", "null"]},
-                "reason": {"type": ["string", "null"]}
-            },
-            "required": ["plant_id", "duration_seconds", "zone_id", "reason"],
-            "additionalProperties": False
-        },
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_plant_state",
-        "description": "Get the consolidated current state of a plant.",
-        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_current_sensor_state",
-        "description": "Get the latest known sensor values for a plant.",
-        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_latest_vision_analysis",
-        "description": "Get the latest vision-derived plant analysis.",
-        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_current_decision",
-        "description": "Get the latest platform decision for a plant.",
-        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_recent_events",
-        "description": "Get recent observable plant-platform events.",
-        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "run_monitoring_cycle",
-        "description": "Prepare a monitoring-cycle request. This does not directly actuate hardware.",
-        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
-        "strict": True,
-    },
-    {
-        "type": "function",
-        "name": "get_irrigation_history",
-        "description": "Read recent irrigation actions for a plant.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "plant_id": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-            },
-            "required": ["plant_id", "limit"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
+{"type":"function","name":"get_plant","description":"Get identity and configuration for a plant.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_sensor_history","description":"Read recent sensor observations for a plant.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}},"required":["plant_id","limit"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_plant_observations","description":"Read recent camera/vision-derived plant observations.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["plant_id","limit"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_decisions","description":"Read recent platform decisions and their reasons.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["plant_id","limit"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"request_irrigation","description":"Request irrigation through authorization and the platform safety gate. This tool never executes hardware.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"},"duration_seconds":{"type":"integer","minimum":1,"maximum":300},"zone_id":{"type":["string","null"]},"reason":{"type":["string","null"]}},"required":["plant_id","duration_seconds","zone_id","reason"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_plant_state","description":"Get consolidated current plant state.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_current_sensor_state","description":"Get latest known sensor values.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_latest_vision_analysis","description":"Get latest vision-derived analysis.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_current_decision","description":"Get latest platform decision.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_recent_events","description":"Get recent plant-platform events.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"run_monitoring_cycle","description":"Run one complete platform monitoring cycle. Hardware remains in mock mode.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"}},"required":["plant_id"],"additionalProperties":False},"strict":True},
+{"type":"function","name":"get_irrigation_history","description":"Read recent irrigation actions.","parameters":{"type":"object","properties":{"plant_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}},"required":["plant_id","limit"],"additionalProperties":False},"strict":True}
 ]
 
-
-def execute_tool(db: Session, name: str, arguments: dict) -> str:
-    handlers = {
-        "get_plant": get_plant,
-        "get_sensor_history": get_sensor_history,
-        "get_plant_observations": get_plant_observations,
-        "get_decisions": get_decisions,
-        "get_irrigation_history": get_irrigation_history,
-        "get_plant_state": get_plant_state,
-        "get_current_sensor_state": get_current_sensor_state,
-        "get_latest_vision_analysis": get_latest_vision_analysis,
-        "get_current_decision": get_current_decision,
-        "get_recent_events": get_recent_events,
-        "run_monitoring_cycle": run_monitoring_cycle,
-        "request_irrigation": request_irrigation,
-    }
-    handler = handlers.get(name)
-    if handler is None:
-        return json.dumps({"error": f"Unknown tool: {name}"})
-    return json.dumps(handler(db, **arguments), default=_serialize)
+def execute_tool(db: Session,name:str,arguments:dict)->str:
+    handlers={"get_plant":get_plant,"get_sensor_history":get_sensor_history,"get_plant_observations":get_plant_observations,"get_decisions":get_decisions,"get_irrigation_history":get_irrigation_history,"get_plant_state":get_plant_state,"get_current_sensor_state":get_current_sensor_state,"get_latest_vision_analysis":get_latest_vision_analysis,"get_current_decision":get_current_decision,"get_recent_events":get_recent_events,"run_monitoring_cycle":run_monitoring_cycle,"request_irrigation":request_irrigation}
+    handler=handlers.get(name)
+    if handler is None: return json.dumps({"error":f"Unknown tool: {name}"})
+    return json.dumps(handler(db,**arguments),default=_serialize)
