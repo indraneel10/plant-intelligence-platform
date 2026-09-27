@@ -8,6 +8,8 @@ from app.api.plants import router as plants_router
 from app.api.observations import router as observations_router
 from app.api.history import router as history_router
 from app.api.monitor import router as monitor_router
+from app.api.state import router as state_router
+from app.api.actions import router as actions_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -20,6 +22,8 @@ app.include_router(plants_router)
 app.include_router(observations_router)
 app.include_router(history_router)
 app.include_router(monitor_router)
+app.include_router(state_router)
+app.include_router(actions_router)
 app.include_router(ai_router)
 
 
