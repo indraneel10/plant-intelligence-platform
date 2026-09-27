@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from app.adapters.mock import MockActuator, MockCamera, MockSensor
-from app.adapters.cameras.raspberry_pi import RaspberryPiCamera
+from app.runtime import build_monitor
 from app.domain.profile import PlantProfile
 from app.intelligence.decision_engine import DecisionEngine
 from app.intelligence.safety_engine import SafetyEngine
@@ -26,6 +25,8 @@ def run_monitor(plant_id: str):
     return {
         "frame_id": result.frame_id,
         "decision": result.decision.action.value,
+        "health_score": result.observation.health_score,
+        "soil_moisture": next((r.value for r in result.sensor_readings if r.sensor_type.value == "soil_moisture"), None),
         "reason": result.decision.reason,
         "confidence": result.decision.confidence,
         "action": result.action.action_type.value if result.action else None,
