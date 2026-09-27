@@ -1,6 +1,7 @@
 import json
 from sqlalchemy.orm import Session
 
+from app.ai.state_tools import get_current_decision, get_current_sensor_state, get_latest_vision_analysis, get_plant_state, get_recent_events, run_monitoring_cycle
 from app.persistence.models import (
     DecisionModel,
     IrrigationActionModel,
@@ -113,6 +114,53 @@ def get_irrigation_history(db: Session, plant_id: str, limit: int = 10) -> list[
     ]
 
 
+def request_irrigation(db: Session, plant_id: str, duration_seconds: int, zone_id: str | None = None, reason: str | None = None) -> dict:
+    """Validate an irrigation request through the platform safety engine without executing hardware."""
+    from datetime import datetime, timezone
+    from app.core.exceptions import SafetyViolation
+    from app.domain.decision import Decision, DecisionAction
+    from app.domain.profile import PlantProfile
+    from app.intelligence.safety_engine import SafetyEngine
+
+    plant = db.get(PlantModel, plant_id)
+    if plant is None:
+        return {"status": "rejected", "reason": "Plant not found", "plant_id": plant_id}
+    target_zone = zone_id or plant.zone_id
+    if not target_zone:
+        return {"status": "rejected", "reason": "No irrigation zone configured", "plant_id": plant_id}
+    if plant.zone_id and zone_id and zone_id != plant.zone_id:
+        return {"status": "rejected", "reason": "Requested zone does not match plant zone", "plant_id": plant_id}
+
+    profile = PlantProfile(
+        plant_id=plant_id,
+        zone_id=target_zone,
+        max_irrigation_seconds=min(300, duration_seconds),
+    )
+    decision = Decision(
+        plant_id=plant_id,
+        action=DecisionAction.WATER,
+        reason=reason or "AI Copilot requested irrigation.",
+        confidence=1.0,
+        duration_seconds=duration_seconds,
+        created_at=datetime.now(timezone.utc),
+    )
+    try:
+        action = SafetyEngine().approve(decision, profile, tank_level=100.0)
+    except SafetyViolation as exc:
+        return {"status": "rejected", "reason": str(exc), "plant_id": plant_id}
+    if action is None:
+        return {"status": "rejected", "reason": "Safety engine did not approve the request", "plant_id": plant_id}
+    return {
+        "status": "approved",
+        "executed": False,
+        "plant_id": plant_id,
+        "zone_id": action.zone_id,
+        "duration_seconds": action.duration_seconds,
+        "action_type": action.action_type.value,
+        "message": "Safety gate approved the request. Hardware execution is disabled for the AI tool.",
+    }
+
+
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -173,6 +221,65 @@ TOOL_SCHEMAS = [
     },
     {
         "type": "function",
+        "name": "request_irrigation",
+        "description": "Request irrigation through the platform safety gate. This tool validates and approves a request but never executes hardware.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plant_id": {"type": "string"},
+                "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+                "zone_id": {"type": ["string", "null"]},
+                "reason": {"type": ["string", "null"]}
+            },
+            "required": ["plant_id", "duration_seconds", "zone_id", "reason"],
+            "additionalProperties": False
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_plant_state",
+        "description": "Get the consolidated current state of a plant.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_current_sensor_state",
+        "description": "Get the latest known sensor values for a plant.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_latest_vision_analysis",
+        "description": "Get the latest vision-derived plant analysis.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_current_decision",
+        "description": "Get the latest platform decision for a plant.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_recent_events",
+        "description": "Get recent observable plant-platform events.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "run_monitoring_cycle",
+        "description": "Prepare a monitoring-cycle request. This does not directly actuate hardware.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
         "name": "get_irrigation_history",
         "description": "Read recent irrigation actions for a plant.",
         "parameters": {
@@ -196,6 +303,13 @@ def execute_tool(db: Session, name: str, arguments: dict) -> str:
         "get_plant_observations": get_plant_observations,
         "get_decisions": get_decisions,
         "get_irrigation_history": get_irrigation_history,
+        "get_plant_state": get_plant_state,
+        "get_current_sensor_state": get_current_sensor_state,
+        "get_latest_vision_analysis": get_latest_vision_analysis,
+        "get_current_decision": get_current_decision,
+        "get_recent_events": get_recent_events,
+        "run_monitoring_cycle": run_monitoring_cycle,
+        "request_irrigation": request_irrigation,
     }
     handler = handlers.get(name)
     if handler is None:
