@@ -54,3 +54,18 @@ class IrrigationActionModel(Base):
     action_type: Mapped[str] = mapped_column(String(64))
     duration_seconds: Mapped[int] = mapped_column(Integer)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+class AuditEventModel(Base):
+    __tablename__ = "audit_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    actor_id: Mapped[str] = mapped_column(String(128), index=True)
+    actor_role: Mapped[str] = mapped_column(String(64), index=True)
+    plant_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    action_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    zone_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
