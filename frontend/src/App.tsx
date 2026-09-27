@@ -24,10 +24,15 @@ function App(){
     }catch{setError("Monitoring cycle failed. Check the backend and hardware mode.")}finally{setRunning(false)}
   }
 
-  function send(){
+  async function send(){
     const text=input.trim();if(!text)return;
-    const reply=monitor?copilot(text,plant,monitor):"Select a plant and run a monitoring cycle first. I will then use the platform's live result as context.";
-    setMessages(m=>[...m,{role:"user",text},{role:"assistant",text:reply}]);setInput("");
+    setMessages(m=>[...m,{role:"user",text}]);setInput("");
+    try{
+      const result=await api.chat(text,selected||undefined);
+      setMessages(m=>[...m,{role:"assistant",text:result.message}]);
+    }catch{
+      setMessages(m=>[...m,{role:"assistant",text:"The AI Copilot service is unavailable. Check the backend and API configuration."}]);
+    }
   }
 
   return <div className="shell">
