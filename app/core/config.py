@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     model_dir: str = "./data/models"
     mqtt_broker_host: str = "localhost"
     mqtt_broker_port: int = 1883
-    capture_interval_hours: int = 48
     hardware_mode: str = "mock"
     mqtt_sensor_topic: str = "plant/sensors"
     mqtt_actuator_topic: str = "plant/actuators/command"
