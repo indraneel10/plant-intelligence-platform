@@ -1,0 +1,10 @@
+[Unit]
+Description=Plant Intelligence monitoring cycle
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/opt/plant-intelligence-platform
+ExecStart=/opt/plant-intelligence-platform/.venv/bin/python scripts/run_monitor.py plant-001 zone-1
