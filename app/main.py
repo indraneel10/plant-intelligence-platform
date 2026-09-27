@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.ai import router as ai_router
 from app.api.health import router as health_router
 from app.core.config import settings
 from app.persistence.database import init_db
@@ -19,6 +20,8 @@ app.include_router(plants_router)
 app.include_router(observations_router)
 app.include_router(history_router)
 app.include_router(monitor_router)
+app.include_router(ai_router)
+
 
 @app.on_event("startup")
 def startup() -> None:
