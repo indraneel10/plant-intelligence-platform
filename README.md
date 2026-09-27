@@ -62,3 +62,19 @@ pip install -e ".[dev]"
 pytest
 uvicorn app.main:app --reload
 ```
+
+
+## Deployment
+
+See `docs/DEPLOYMENT_GUIDE.md` for Raspberry Pi, camera, MQTT, ESP32, safety, and scheduled-monitoring setup.
+
+For unattended Raspberry Pi operation:
+
+1. Set `HARDWARE_MODE=pi` in `.env`.
+2. Verify the ESP32 reports `READY`.
+3. Test the camera independently.
+4. Run a manual monitoring cycle.
+5. Install the systemd service and timer from `deploy/systemd/`.
+6. Start with one irrigation zone and a physical emergency cutoff.
+
+The default hardware mode is `mock`; real hardware is opt-in.
