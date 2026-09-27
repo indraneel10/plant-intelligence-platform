@@ -1,6 +1,7 @@
 import json
 from sqlalchemy.orm import Session
 
+from app.ai.state_tools import get_current_decision, get_current_sensor_state, get_latest_vision_analysis, get_plant_state, get_recent_events, run_monitoring_cycle
 from app.persistence.models import (
     DecisionModel,
     IrrigationActionModel,
@@ -173,6 +174,48 @@ TOOL_SCHEMAS = [
     },
     {
         "type": "function",
+        "name": "get_plant_state",
+        "description": "Get the consolidated current state of a plant.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_current_sensor_state",
+        "description": "Get the latest known sensor values for a plant.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_latest_vision_analysis",
+        "description": "Get the latest vision-derived plant analysis.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_current_decision",
+        "description": "Get the latest platform decision for a plant.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_recent_events",
+        "description": "Get recent observable plant-platform events.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "run_monitoring_cycle",
+        "description": "Prepare a monitoring-cycle request. This does not directly actuate hardware.",
+        "parameters": {"type": "object", "properties": {"plant_id": {"type": "string"}}, "required": ["plant_id"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
         "name": "get_irrigation_history",
         "description": "Read recent irrigation actions for a plant.",
         "parameters": {
@@ -196,6 +239,12 @@ def execute_tool(db: Session, name: str, arguments: dict) -> str:
         "get_plant_observations": get_plant_observations,
         "get_decisions": get_decisions,
         "get_irrigation_history": get_irrigation_history,
+        "get_plant_state": get_plant_state,
+        "get_current_sensor_state": get_current_sensor_state,
+        "get_latest_vision_analysis": get_latest_vision_analysis,
+        "get_current_decision": get_current_decision,
+        "get_recent_events": get_recent_events,
+        "run_monitoring_cycle": run_monitoring_cycle,
     }
     handler = handlers.get(name)
     if handler is None:
