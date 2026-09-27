@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.adapters.mock import MockActuator, MockCamera, MockSensor
+from app.adapters.cameras.raspberry_pi import RaspberryPiCamera
 from app.domain.profile import PlantProfile
 from app.intelligence.decision_engine import DecisionEngine
 from app.intelligence.safety_engine import SafetyEngine
