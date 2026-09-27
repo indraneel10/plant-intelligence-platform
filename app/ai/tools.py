@@ -114,6 +114,53 @@ def get_irrigation_history(db: Session, plant_id: str, limit: int = 10) -> list[
     ]
 
 
+def request_irrigation(db: Session, plant_id: str, duration_seconds: int, zone_id: str | None = None, reason: str | None = None) -> dict:
+    """Validate an irrigation request through the platform safety engine without executing hardware."""
+    from datetime import datetime, timezone
+    from app.core.exceptions import SafetyViolation
+    from app.domain.decision import Decision, DecisionAction
+    from app.domain.profile import PlantProfile
+    from app.intelligence.safety_engine import SafetyEngine
+
+    plant = db.get(PlantModel, plant_id)
+    if plant is None:
+        return {"status": "rejected", "reason": "Plant not found", "plant_id": plant_id}
+    target_zone = zone_id or plant.zone_id
+    if not target_zone:
+        return {"status": "rejected", "reason": "No irrigation zone configured", "plant_id": plant_id}
+    if plant.zone_id and zone_id and zone_id != plant.zone_id:
+        return {"status": "rejected", "reason": "Requested zone does not match plant zone", "plant_id": plant_id}
+
+    profile = PlantProfile(
+        plant_id=plant_id,
+        zone_id=target_zone,
+        max_irrigation_seconds=min(300, duration_seconds),
+    )
+    decision = Decision(
+        plant_id=plant_id,
+        action=DecisionAction.WATER,
+        reason=reason or "AI Copilot requested irrigation.",
+        confidence=1.0,
+        duration_seconds=duration_seconds,
+        created_at=datetime.now(timezone.utc),
+    )
+    try:
+        action = SafetyEngine().approve(decision, profile, tank_level=100.0)
+    except SafetyViolation as exc:
+        return {"status": "rejected", "reason": str(exc), "plant_id": plant_id}
+    if action is None:
+        return {"status": "rejected", "reason": "Safety engine did not approve the request", "plant_id": plant_id}
+    return {
+        "status": "approved",
+        "executed": False,
+        "plant_id": plant_id,
+        "zone_id": action.zone_id,
+        "duration_seconds": action.duration_seconds,
+        "action_type": action.action_type.value,
+        "message": "Safety gate approved the request. Hardware execution is disabled for the AI tool.",
+    }
+
+
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -169,6 +216,23 @@ TOOL_SCHEMAS = [
             },
             "required": ["plant_id", "limit"],
             "additionalProperties": False,
+        },
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "request_irrigation",
+        "description": "Request irrigation through the platform safety gate. This tool validates and approves a request but never executes hardware.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plant_id": {"type": "string"},
+                "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+                "zone_id": {"type": ["string", "null"]},
+                "reason": {"type": ["string", "null"]}
+            },
+            "required": ["plant_id", "duration_seconds", "zone_id", "reason"],
+            "additionalProperties": False
         },
         "strict": True,
     },
@@ -245,6 +309,7 @@ def execute_tool(db: Session, name: str, arguments: dict) -> str:
         "get_current_decision": get_current_decision,
         "get_recent_events": get_recent_events,
         "run_monitoring_cycle": run_monitoring_cycle,
+        "request_irrigation": request_irrigation,
     }
     handler = handlers.get(name)
     if handler is None:
