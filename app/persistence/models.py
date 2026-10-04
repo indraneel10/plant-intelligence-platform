@@ -36,6 +36,23 @@ class PlantObservationModel(Base):
     water_stress_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
     heat_stress_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+class VisionObservationModel(Base):
+    __tablename__ = "vision_observations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    device_id: Mapped[str] = mapped_column(String(128), index=True)
+    plant_id: Mapped[str] = mapped_column(String(64), index=True)
+    image_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    model_name: Mapped[str] = mapped_column(String(128))
+    model_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    health_score: Mapped[float] = mapped_column(Float)
+    wilting_probability: Mapped[float] = mapped_column(Float)
+    yellowing_probability: Mapped[float] = mapped_column(Float)
+    disease_probability: Mapped[float] = mapped_column(Float)
+    image_quality: Mapped[float] = mapped_column(Float)
+    confidence: Mapped[float] = mapped_column(Float)
+
 class DecisionModel(Base):
     __tablename__ = "decisions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
